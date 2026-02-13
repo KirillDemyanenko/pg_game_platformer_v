@@ -3,7 +3,7 @@ import math
 import random
 from settings import (PLAYER_SPEED, PLAYER_JUMP_POWER, GRAVITY,
                       PLAYER_FRICTION, MAX_FALL_SPEED, PROJECTILE_COOLDOWN,
-                      ATTACK_ANIMATION_DURATION, USE_MASK_COLLISION)
+                      USE_MASK_COLLISION)
 from particle import Particle
 from animation import AnimationManager
 from projectile import Projectile
