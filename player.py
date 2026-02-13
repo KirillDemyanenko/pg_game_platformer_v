@@ -46,8 +46,8 @@ class Player(pygame.sprite.Sprite):
         # Атака
         self.projectiles = pygame.sprite.Group()
         self.attack_cooldown = 0
-        self.attack_timer = 0
         self.is_attacking = False
+        self.attack_triggered = False  # чтобы выстрел был один за анимацию
 
         # Частицы
         self.particles = []
@@ -57,9 +57,10 @@ class Player(pygame.sprite.Sprite):
 
     def _load_animations(self):
         """Загружает все анимации"""
-        self.anim_manager.load_from_directory(self.assets_path, "idle", frame_duration=10, loop=True)
+        self.anim_manager.load_from_directory(self.assets_path, "idle", frame_duration=5, loop=True)
         self.anim_manager.load_from_directory(self.assets_path, "run", frame_duration=5, loop=True)
         self.anim_manager.load_from_directory(self.assets_path, "jump", frame_duration=5, loop=False)
+        # Атака: 12 кадров, каждый по 3 тика = 36 кадров total (0.6 сек при 60fps)
         self.anim_manager.load_from_directory(self.assets_path, "attack", frame_duration=3, loop=False)
 
         if not self.anim_manager.animations:
@@ -78,22 +79,28 @@ class Player(pygame.sprite.Sprite):
 
         for name, color in colors.items():
             frames = []
-            frame_count = 8 if name == "attack" else 4
+            # Для атаки 12 кадров как в реальной анимации
+            frame_count = 12 if name == "attack" else 4
             for i in range(frame_count):
                 surface = pygame.Surface((48 if name == "attack" else 32, 48), pygame.SRCALPHA)
                 offset = i if i < 2 else 3 - i
                 width = 32
 
                 if name == "attack":
-                    width = 40 + i * 4
-                    pygame.draw.rect(surface, (150, 150, 150), (20, 20, 20 + i * 3, 8))
+                    # Анимация атаки: выдвигаем "оружие" постепенно и убираем
+                    if i < 6:
+                        weapon_extend = i * 4  # 0, 4, 8, 12, 16, 20
+                    else:
+                        weapon_extend = (11 - i) * 4  # 20, 16, 12, 8, 4, 0
+                    width = 32 + weapon_extend
+                    pygame.draw.rect(surface, (150, 150, 150), (20, 20, 10 + weapon_extend, 8))
 
                 pygame.draw.ellipse(surface, color, (4 + offset, 16, width - 8 - offset * 2, 32))
                 pygame.draw.circle(surface, (255, 220, 177), (16, 12), 10)
                 frames.append(surface)
 
-            loop = name != "attack" and name != "jump"
-            self.anim_manager.add_animation(name, frames, frame_duration=5, loop=loop)
+            loop = name not in ["attack", "jump"]
+            self.anim_manager.add_animation(name, frames, frame_duration=3, loop=loop)
 
     def _update_mask(self):
         """Создаёт маску из обрезанного изображения"""
@@ -110,31 +117,42 @@ class Player(pygame.sprite.Sprite):
     def update(self, platforms):
         keys = pygame.key.get_pressed()
 
-        # Управление движением
+        # Управление движением (можно двигаться во время атаки, но не менять направление)
         moving = False
-        if not self.is_attacking or True:
-            if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-                self.velocity_x = -self.speed
+        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+            if not self.is_attacking:  # Нельзя менять направление во время атаки
                 self.facing_right = False
-                moving = True
-            elif keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-                self.velocity_x = self.speed
+            self.velocity_x = -self.speed
+            moving = True
+        elif keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+            if not self.is_attacking:
                 self.facing_right = True
-                moving = True
-            else:
-                self.velocity_x *= self.friction
+            self.velocity_x = self.speed
+            moving = True
+        else:
+            self.velocity_x *= self.friction
 
-        # Атака
+        # Атака по нажатию
         if self.attack_cooldown > 0:
             self.attack_cooldown -= 1
 
-        if keys[pygame.K_j] or keys[pygame.K_z] or keys[pygame.K_LCTRL]:
-            self._attack()
+        if (keys[pygame.K_j] or keys[pygame.K_z] or keys[pygame.K_LCTRL]) and not self.is_attacking:
+            if self.attack_cooldown <= 0:
+                self._start_attack()
 
+        # Проверяем окончание анимации атаки
         if self.is_attacking:
-            self.attack_timer -= 1
-            if self.attack_timer <= 0:
+            current_anim = self.anim_manager.current_animation
+            if current_anim and current_anim.finished:
                 self.is_attacking = False
+                self.attack_triggered = False
+                # Возвращаемся к подходящей анимации
+                if not self.on_ground:
+                    self.anim_manager.play("jump")
+                elif abs(self.velocity_x) > 0.5:
+                    self.anim_manager.play("run")
+                else:
+                    self.anim_manager.play("idle")
 
         # Определение состояния
         if self.is_attacking:
@@ -146,18 +164,20 @@ class Player(pygame.sprite.Sprite):
         else:
             new_state = "idle"
 
+        # Меняем анимацию только если не атакуем или это принудительная смена
         if new_state != self.state:
             self.state = new_state
-            force = new_state == "attack"
-            self.anim_manager.play(new_state, force_restart=force)
+            if new_state == "attack":
+                self.anim_manager.play("attack", force_restart=True)
+            elif not self.is_attacking:  # Не переключаемся если атакуем
+                self.anim_manager.play(new_state)
 
-        # Прыжок
-        if (keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]) and self.on_ground:
+        # Прыжок (нельзя во время атаки)
+        if not self.is_attacking and (keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]) and self.on_ground:
             self.velocity_y = self.jump_power
             self.on_ground = False
             self._create_dust_particles()
-            if not self.is_attacking:
-                self.anim_manager.play("jump", force_restart=True)
+            self.anim_manager.play("jump", force_restart=True)
 
         # Гравитация
         if not self.on_ground or self.velocity_y < 0:
@@ -173,7 +193,14 @@ class Player(pygame.sprite.Sprite):
             self.image = current_frame
             self._update_mask()
 
-        # Обновление снарядов (ВЕРНУЛ!)
+        # Выстрел происходит в середине анимации атаки (кадр 3-4)
+        if self.is_attacking and not self.attack_triggered:
+            current_anim = self.anim_manager.current_animation
+            if current_anim and current_anim.current_frame == 3:  # середина анимации
+                self._fire_projectile()
+                self.attack_triggered = True
+
+        # Обновление снарядов
         self.projectiles.update(platforms)
 
         # Обновление частиц
@@ -182,6 +209,27 @@ class Player(pygame.sprite.Sprite):
                 self.particles.remove(p)
 
         self.velocity_y = min(self.velocity_y, MAX_FALL_SPEED)
+
+    def _start_attack(self):
+        """Начинает анимацию атаки"""
+        self.is_attacking = True
+        self.attack_triggered = False
+        self.attack_cooldown = PROJECTILE_COOLDOWN
+        self.anim_manager.play("attack", force_restart=True)
+
+    def _fire_projectile(self):
+        """Создаёт снаряд"""
+        spawn_y = self.rect.bottom - 32
+        offset_x = 20 if self.facing_right else -20
+
+        projectile = Projectile(
+            self.rect.centerx + offset_x,
+            spawn_y,
+            self.facing_right
+        )
+        self.projectiles.add(projectile)
+
+        self._create_shoot_particles()
 
     def _move_with_collision(self, platforms):
         """Движение с проверкой коллизий по маске"""
@@ -256,33 +304,9 @@ class Player(pygame.sprite.Sprite):
                     self.rect.top = platform.rect.bottom
                     self.velocity_y = 0
 
-    def _attack(self):
-        """Выполняет атаку (стрельбу)"""
-        if self.attack_cooldown <= 0 and not self.is_attacking:
-            self.is_attacking = True
-            self.attack_timer = ATTACK_ANIMATION_DURATION
-            self.attack_cooldown = PROJECTILE_COOLDOWN
-
-            # Снаряд вылетает на высоте 32 пикселя от низа игрока
-            # (в середине нижней половины спрайта 128x128, где реальный игрок 64px)
-            spawn_y = self.rect.bottom - 32
-
-            # Смещение по X в зависимости от направления
-            offset_x = 20 if self.facing_right else -20
-
-            projectile = Projectile(
-                self.rect.centerx + offset_x,
-                spawn_y,
-                self.facing_right
-            )
-            self.projectiles.add(projectile)
-
-            self._create_shoot_particles()
-
     def _create_shoot_particles(self):
         """Создаёт частицы при выстреле"""
         offset_x = 25 if self.facing_right else -25
-        # Частицы на той же высоте что и снаряд
         spawn_y = self.rect.bottom - 32
 
         for _ in range(3):
