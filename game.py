@@ -37,15 +37,17 @@ class Game:
         self._create_demo_level()
 
     def _create_demo_level(self):
-        """Создаёт демо-уровень с NPC в середине"""
+        """Создаёт демо-уровень с NPC на земле"""
         self.platforms.empty()
         self.all_sprites.empty()
         self.npcs.empty()
 
         tile_size = int(64 * self.tile_scale)
 
+        # Пол (высота 600)
+        ground_y = 600
         for i in range(0, 2000, tile_size):
-            platform = Platform(i, 600, tile_size, tile_size, 'ground')
+            platform = Platform(i, ground_y, tile_size, tile_size, 'ground')
             self.platforms.add(platform)
             self.all_sprites.add(platform)
 
@@ -66,9 +68,10 @@ class Game:
         self.player = Player(100, 400, self.player_assets_path)
         self.all_sprites.add(self.player)
 
-        # NPC в середине карты
-        npc_x = 1000  # середина демо-уровня
-        npc_y = 600 - 128  # на земле
+        # NPC в середине карты, падает сверху на пол
+        npc_x = 1000
+        npc_y = 100  # высоко над землёй, будет падать
+
         npc = NPC(npc_x, npc_y, NPC_ASSETS_DIR,
                   "Добро пожаловать в этот мир! Я уже много лет исследую эти земли. "
                   "На востоке есть древние руины, но путь туда опасен. "
@@ -130,9 +133,17 @@ class Game:
             self.player = Player(100, 100, self.player_assets_path)
             self.all_sprites.add(self.player)
 
-        # NPC в середине карты
+        # NPC в середине карты, стоящий на земле
+        # Находим нижнюю точку карты (где есть платформы)
+        lowest_platform_y = self.level_height
+        for platform in self.platforms:
+            if platform.rect.bottom > lowest_platform_y:
+                lowest_platform_y = platform.rect.bottom
+
         npc_x = self.level_width // 2
-        npc_y = self.level_height - 200  # чуть выше низа
+        npc_sprite_height = 128
+        npc_y = lowest_platform_y - npc_sprite_height
+
         npc = NPC(npc_x, npc_y, NPC_ASSETS_DIR,
                   "Приветствую тебя в этом загадочном мире! "
                   "Я старейшина этих мест. Давным-давно здесь процветала великая цивилизация, "
@@ -147,9 +158,9 @@ class Game:
         self._load_map()
 
     def update(self):
-        # Обновляем NPC (проверка диалога)
+        # Обновляем NPC с платформами (физика)
         for npc in self.npcs:
-            npc.update(self.player)
+            npc.update(self.player, self.platforms)
 
         # Проверяем блокировку движения
         blocked = any(npc.is_blocking() for npc in self.npcs)
@@ -158,7 +169,6 @@ class Game:
         if not blocked:
             self.player.update(self.platforms)
         else:
-            # Игрок стоит, но можно пропустить диалог
             keys = pygame.key.get_pressed()
             if keys[pygame.K_SPACE] or keys[pygame.K_e] or keys[pygame.K_RETURN]:
                 for npc in self.npcs:

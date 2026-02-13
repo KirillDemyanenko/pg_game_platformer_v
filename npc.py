@@ -2,7 +2,7 @@ import pygame
 from animation import AnimationManager
 from settings import (NPC_BODY_COLOR, NPC_SKIN_COLOR, DIALOG_TRIGGER_DISTANCE,
                       DIALOG_TEXT_SPEED, DIALOG_BG, DIALOG_BORDER, DIALOG_TEXT,
-                      WHITE, BLACK)
+                      GRAVITY, USE_MASK_COLLISION)
 
 
 class NPC(pygame.sprite.Sprite):
@@ -20,8 +20,15 @@ class NPC(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(topleft=(x, y))
         self._update_mask()
 
+        # Физика (как у игрока)
+        self.velocity_x = 0
+        self.velocity_y = 0
+        self.gravity = GRAVITY
+        self.on_ground = False
+        self.ground_buffer = 2
+
         # Диалог
-        self.dialog_text = dialog_text or "Привет, путник! Я расскажу тебе историю этого мира..."
+        self.dialog_text = dialog_text or "Привет, путник!"
         self.dialog_shown = False
         self.dialog_active = False
         self.current_text = ""
@@ -32,8 +39,8 @@ class NPC(pygame.sprite.Sprite):
         # Облако диалога
         self.cloud_surface = None
         self.cloud_rect = None
-        self.cloud_width = 400  # Увеличена ширина облака
-        self.cloud_padding = 20  # Отступы внутри облака
+        self.cloud_width = 400
+        self.cloud_padding = 20
 
     def _load_animations(self):
         """Загружает анимации NPC"""
@@ -70,18 +77,37 @@ class NPC(pygame.sprite.Sprite):
             self.mask = pygame.mask.from_surface(self.image)
             self.mask_offset = (0, 0)
 
-    def update(self, player):
-        """Обновляет NPC и проверяет диалог"""
-        distance = pygame.math.Vector2(
-            self.rect.centerx - player.rect.centerx,
-            self.rect.centery - player.rect.centery
-        ).length()
+    def update(self, player, platforms):
+        """Обновляет NPC: физика + диалог"""
+        # Гравитация
+        if not self.on_ground:
+            self.velocity_y += self.gravity
 
-        # Активация диалога при приближении (1 раз за игру)
-        if distance < DIALOG_TRIGGER_DISTANCE and not self.dialog_shown and not self.dialog_active:
-            self._start_dialog()
+        # Движение по Y с коллизией
+        if self.velocity_y != 0 or not self.on_ground:
+            self.rect.y += self.velocity_y
+            was_on_ground = self.on_ground
+            self.on_ground = False
 
-        # Обновление диалога
+            if USE_MASK_COLLISION:
+                self._check_collision_mask(platforms)
+            else:
+                self._check_collision_rect(platforms)
+
+            if not was_on_ground and self.on_ground:
+                self.rect.y -= self.ground_buffer
+                self.velocity_y = 0
+
+        # Диалог (только когда стоим на земле)
+        if self.on_ground:
+            distance = pygame.math.Vector2(
+                self.rect.centerx - player.rect.centerx,
+                self.rect.centery - player.rect.centery
+            ).length()
+
+            if distance < DIALOG_TRIGGER_DISTANCE and not self.dialog_shown and not self.dialog_active:
+                self._start_dialog()
+
         if self.dialog_active:
             self._update_dialog()
 
@@ -91,6 +117,39 @@ class NPC(pygame.sprite.Sprite):
         if current_frame:
             self.image = current_frame
             self._update_mask()
+
+    def _check_collision_mask(self, platforms):
+        """Проверка коллизий с платформами по маске"""
+        for platform in platforms:
+            if not self.rect.colliderect(platform.rect):
+                continue
+
+            offset = (
+                platform.rect.x - self.rect.x - self.mask_offset[0],
+                platform.rect.y - self.rect.y - self.mask_offset[1]
+            )
+
+            if platform.mask.overlap(self.mask, offset):
+                if self.velocity_y > 0:
+                    self.rect.bottom = platform.rect.top + self.ground_buffer
+                    self.velocity_y = 0
+                    self.on_ground = True
+                elif self.velocity_y < 0:
+                    self.rect.top = platform.rect.bottom
+                    self.velocity_y = 0
+                return
+
+    def _check_collision_rect(self, platforms):
+        """Проверка коллизий прямоугольниками"""
+        hits = pygame.sprite.spritecollide(self, platforms, False)
+        for platform in hits:
+            if self.velocity_y > 0:
+                self.rect.bottom = platform.rect.top
+                self.velocity_y = 0
+                self.on_ground = True
+            elif self.velocity_y < 0:
+                self.rect.top = platform.rect.bottom
+                self.velocity_y = 0
 
     def _start_dialog(self):
         """Начинает диалог"""
@@ -114,11 +173,10 @@ class NPC(pygame.sprite.Sprite):
             self.dialog_finished = True
 
     def _render_cloud(self):
-        """Рендерит облако диалога с автопереносом текста"""
+        """Рендерит облако диалога"""
         font = pygame.font.Font(None, 24)
         max_text_width = self.cloud_width - self.cloud_padding * 2
 
-        # Разбиваем текст на строки с учётом ширины
         words = self.current_text.split(' ')
         lines = []
         current_line = ""
@@ -130,9 +188,7 @@ class NPC(pygame.sprite.Sprite):
             if test_width <= max_text_width:
                 current_line = test_line
             else:
-                # Если слово не помещается вообще, разбиваем его
                 if current_line == "":
-                    # Длинное слово — разбиваем посимвольно
                     for char in word:
                         test_line = current_line + char
                         if font.size(test_line)[0] <= max_text_width:
@@ -147,15 +203,12 @@ class NPC(pygame.sprite.Sprite):
 
         lines.append(current_line)
 
-        # Размеры облака
-        line_height = font.get_height() + 2  # +2 для межстрочного интервала
+        line_height = font.get_height() + 2
         text_height = len(lines) * line_height
         cloud_height = max(60, text_height + self.cloud_padding * 2)
 
-        # Создаём поверхность
         self.cloud_surface = pygame.Surface((self.cloud_width, cloud_height), pygame.SRCALPHA)
 
-        # Фон (облако с закруглениями)
         corner_radius = 20
         pygame.draw.rect(self.cloud_surface, DIALOG_BG,
                          (0, 0, self.cloud_width, cloud_height),
@@ -164,7 +217,6 @@ class NPC(pygame.sprite.Sprite):
                          (0, 0, self.cloud_width, cloud_height),
                          width=2, border_radius=corner_radius)
 
-        # Хвостик облака (треугольник снизу)
         tail_width = 20
         tail_height = 15
         tail_x = self.cloud_width // 2 - tail_width // 2
@@ -178,20 +230,18 @@ class NPC(pygame.sprite.Sprite):
         pygame.draw.polygon(self.cloud_surface, DIALOG_BG, points)
         pygame.draw.polygon(self.cloud_surface, DIALOG_BORDER, points, 2)
 
-        # Текст
         y_offset = self.cloud_padding
         for line in lines:
             text_surface = font.render(line.rstrip(), True, DIALOG_TEXT)
             self.cloud_surface.blit(text_surface, (self.cloud_padding, y_offset))
             y_offset += line_height
 
-        # Позиция над NPC (центрируем)
         self.cloud_rect = self.cloud_surface.get_rect()
         self.cloud_rect.centerx = self.rect.centerx
         self.cloud_rect.bottom = self.rect.top - 10
 
     def close_dialog(self):
-        """Закрывает диалог (вызывается при нажатии клавиши)"""
+        """Закрывает диалог"""
         if self.dialog_finished:
             self.dialog_active = False
             self.dialog_shown = True
@@ -201,19 +251,15 @@ class NPC(pygame.sprite.Sprite):
         return self.dialog_active and not self.dialog_finished
 
     def draw(self, surface, camera_x, camera_y=0):
-        # Рисуем NPC
         surface.blit(self.image, (self.rect.x - camera_x, self.rect.y - camera_y))
 
-        # Рисуем облако диалога
         if self.dialog_active and self.cloud_surface:
-            # Проверяем что облако в пределах экрана
             if (self.cloud_rect.right - camera_x > 0 and
                     self.cloud_rect.left - camera_x < surface.get_width()):
                 surface.blit(self.cloud_surface,
                              (self.cloud_rect.x - camera_x,
                               self.cloud_rect.y - camera_y))
 
-        # Индикатор "!" если можно поговорить
         if not self.dialog_shown and not self.dialog_active:
             distance_indicator = pygame.Surface((20, 20), pygame.SRCALPHA)
             pygame.draw.circle(distance_indicator, (255, 255, 0), (10, 10), 8)
