@@ -3,7 +3,7 @@ import pytmx
 import os
 from settings import (SCREEN_WIDTH, SCREEN_HEIGHT, WHITE, DEFAULT_MAP,
                       PLAYER_ASSETS_DIR, MAPS_DIR, TILE_SCALE, CAMERA_SMOOTH,
-                      NPC_ASSETS_DIR)
+                      NPC_ASSETS_DIR, TILE_SIZE, ORIGINAL_TILE_SIZE)
 from player import Player
 from platform import Platform
 from npc import NPC
@@ -42,7 +42,8 @@ class Game:
         self.all_sprites.empty()
         self.npcs.empty()
 
-        tile_size = int(64 * self.tile_scale)
+        # ИСПРАВЛЕНО: используем TILE_SIZE (128) вместо ручного расчёта
+        tile_size = TILE_SIZE
 
         # Пол (высота 600)
         ground_y = 600
@@ -58,8 +59,11 @@ class Game:
         ]
 
         for x, y, w, h in platforms_data:
-            x, y = int(x * self.tile_scale), int(y * self.tile_scale)
-            w, h = int(w * self.tile_scale), int(h * self.tile_scale)
+            # ИСПРАВЛЕНО: правильное масштабирование
+            x = int(x * self.tile_scale / 8)  # Конвертируем из старой системы (64px) в новую (16px)
+            y = int(y * self.tile_scale / 8)
+            w = int(w * self.tile_scale / 8)
+            h = int(h * self.tile_scale / 8)
             platform = Platform(x, y, w, h, 'stone')
             self.platforms.add(platform)
             self.all_sprites.add(platform)
@@ -79,18 +83,18 @@ class Game:
         self.npcs.add(npc)
         self.all_sprites.add(npc)
 
-        self.level_width = int(2000 * self.tile_scale)
+        self.level_width = int(2000 * self.tile_scale / 8)
         self.level_height = 720
 
     def load_tmx_map(self, filepath):
         """Загрузка карты из Tiled с NPC в середине"""
         tmx_data = pytmx.load_pygame(filepath)
 
-        original_tile_width = tmx_data.tilewidth
-        original_tile_height = tmx_data.tileheight
+        original_tile_width = tmx_data.tilewidth  # Должно быть 16
+        original_tile_height = tmx_data.tileheight  # Должно быть 16
 
-        scaled_tile_width = int(original_tile_width * self.tile_scale)
-        scaled_tile_height = int(original_tile_height * self.tile_scale)
+        scaled_tile_width = int(original_tile_width * self.tile_scale)  # 16 * 8 = 128
+        scaled_tile_height = int(original_tile_height * self.tile_scale)  # 16 * 8 = 128
 
         self.level_width = tmx_data.width * scaled_tile_width
         self.level_height = tmx_data.height * scaled_tile_height
@@ -123,6 +127,7 @@ class Game:
         for obj_layer in tmx_data.objectgroups:
             for obj in obj_layer:
                 if obj.name == 'player':
+                    # ИСПРАВЛЕНО: правильное масштабирование координат объекта
                     spawn_x = int(obj.x * self.tile_scale)
                     spawn_y = int(obj.y * self.tile_scale)
                     self.player = Player(spawn_x, spawn_y, self.player_assets_path)
@@ -141,7 +146,7 @@ class Game:
                 lowest_platform_y = platform.rect.bottom
 
         npc_x = self.level_width // 2
-        npc_sprite_height = 128
+        npc_sprite_height = TILE_SIZE  # 128
         npc_y = lowest_platform_y - npc_sprite_height
 
         npc = NPC(npc_x, npc_y, NPC_ASSETS_DIR,

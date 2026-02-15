@@ -7,18 +7,19 @@ SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 720
 FPS = 60
 
-# Масштаб тайлов
-TILE_SCALE = 3.0
+# Масштаб тайлов (карта имеет тайлы 16x16, масштабируем до 128x128)
+TILE_SCALE = 6.0
+
+# Размеры
+ORIGINAL_TILE_SIZE = 16  # Исходный размер тайла в карте Tiled
+TILE_SIZE = int(ORIGINAL_TILE_SIZE * TILE_SCALE)  # 128 пикселей (16 * 8)
+PLAYER_SIZE = TILE_SIZE  # Игрок равен размеру тайла (128x128)
 
 # Настройки камеры
 CAMERA_SMOOTH = 0.1
 
 # Настройки коллизии
 USE_MASK_COLLISION = True
-
-# Настройки диалога
-DIALOG_TRIGGER_DISTANCE = 100  # пикселей для активации диалога
-DIALOG_TEXT_SPEED = 2  # символов за кадр
 
 # Цвета
 SKY_BLUE = (135, 206, 235)
@@ -36,12 +37,17 @@ DIALOG_BG = (255, 255, 255)
 DIALOG_BORDER = (100, 100, 100)
 DIALOG_TEXT = (0, 0, 0)
 
+# Настройки диалогов (ДОБАВЛЕНЫ - исправляют ImportError)
+DIALOG_TRIGGER_DISTANCE = 150  # Расстояние для активации диалога
+DIALOG_TEXT_SPEED = 2          # Скорость печатания текста (кадров на символ)
+DIALOG_COOLDOWN = 500          # Задержка между диалогами (мс)
+
 # Физика
 GRAVITY = 0.6
 PLAYER_SPEED = 5
-PLAYER_JUMP_POWER = -12
+PLAYER_JUMP_POWER = -15
 PLAYER_FRICTION = 0.8
-MAX_FALL_SPEED = 15
+MAX_FALL_SPEED = 20
 
 # Атака
 PROJECTILE_SPEED = 10

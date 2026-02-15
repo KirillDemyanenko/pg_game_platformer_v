@@ -33,8 +33,12 @@ class Platform(pygame.sprite.Sprite):
             self.image.fill((100, 100, 100))
 
     def set_image(self, image):
-        """Установка изображения из TMX"""
+        """Установка изображения из TMX с обновлением rect и маски"""
+        old_topleft = self.rect.topleft  # Сохраняем позицию
         self.image = image
+        # Обновляем rect под новый размер изображения
+        self.rect = self.image.get_rect(topleft=old_topleft)
+
         # Обновляем маску при смене изображения
         if USE_MASK_COLLISION:
             self.mask = pygame.mask.from_surface(self.image)
